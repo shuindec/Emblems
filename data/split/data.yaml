@@ -1,0 +1,9 @@
+train: C:\Users\suzuk\emblems\data\split\train\images
+val: C:\Users\suzuk\emblems\data\split\val\images
+test: C:\Users\suzuk\emblems\data\split\test\images
+nc: 4
+names:
+- 2-finger-heart
+- traditional-heart
+- traditional-heart-2
+- upside_down_heart

@@ -1,0 +1,72 @@
+
+# Central Configuration
+# ══════════════════════════════════════════════════════════════════════════════
+# PURPOSE:
+#   Single source of truth for all settings across the project.
+#   Every script reads from here — no hardcoded paths or magic numbers.
+#
+# HOW TO USE:
+#   from src.utils import load_config
+#   cfg = load_config()
+#   data_dir = Path(cfg["paths"]["data_dir"])
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Project Paths ──────────────────────────────────────────────────────────
+paths:
+  data_dir    : "C:/Users/suzuk/emblems/data"
+  output_dir  : "C:/Users/suzuk/emblems/outputs"
+  figures_dir : "C:/Users/suzuk/emblems/outputs/figures"
+
+# ── Dataset ────────────────────────────────────────────────────────────────
+dataset:
+  # Source: cleaned images before splitting
+  source_images : "train/images"
+  source_labels : "train/labels"
+  yaml_file     : "data.yaml"
+
+  # Class names must match data.yaml exactly
+  class_names:
+    - "2-finger-heart"
+    - "traditional-heart"
+    - "traditional-heart-2"
+    - "upside_down_heart"
+
+  # Class to exclude from training (set to "" to skip removal)
+  class_to_remove: "full-arm-heart"
+
+# ── Split Settings ─────────────────────────────────────────────────────────
+split:
+  random_seed  : 42      # fixed seed → reproducible splits across machines
+  train_ratio  : 0.60
+  val_ratio    : 0.20
+  # test_ratio is derived: 1 - train - val = 0.20
+
+  # Where split folders are written (relative to data_dir)
+  output_dir   : "split"
+
+# ── Preprocessing ──────────────────────────────────────────────────────────
+preprocessing:
+  image_size   : 224     # resize target for model input (224x224)
+  image_size_h : 224
+  image_size_w : 224
+
+# ── Training (populated in Phase 3) ───────────────────────────────────────
+training:
+  model_name       : "hagridv2"     # options: hagridv2, vitb16, mlp_landmarks
+  num_classes      : 4
+  pretrained       : true
+  freeze_backbone  : true           # set false for full fine-tune
+  epochs           : 50
+  batch_size       : 32
+  learning_rate    : 0.001
+  early_stopping   : 7             # patience (epochs without val improvement)
+  scheduler        : "cosine"      # options: cosine, step, none
+
+# ── Augmentation (populated in Phase 2) ───────────────────────────────────
+augmentation:
+  enabled          : true
+  rotation_degrees : 20
+  brightness_limit : 0.2
+  contrast_limit   : 0.2
+  flip_horizontal  : true
+  blur_limit       : 3
