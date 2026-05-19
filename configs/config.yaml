@@ -16,6 +16,7 @@ paths:
   data_dir    : "C:/Users/suzuk/emblems/data"
   output_dir  : "C:/Users/suzuk/emblems/outputs"
   figures_dir : "C:/Users/suzuk/emblems/outputs/figures"
+  hagridv2_resnet18_weights: "C:/Users/suzuk/emblems/configs/ResNet18.pth"
 
 # ── Dataset ────────────────────────────────────────────────────────────────
 dataset:
@@ -52,7 +53,7 @@ preprocessing:
 
 # ── Training (populated in Phase 3) ───────────────────────────────────────
 training:
-  model_name       : "hagridv2"     # options: hagridv2, vitb16, mlp_landmarks
+  model_name       : "resnet18"     # options: hagridv2, vitb16, mlp_landmarks
   num_classes      : 4
   pretrained       : true
   freeze_backbone  : true           # set false for full fine-tune
@@ -70,3 +71,30 @@ augmentation:
   contrast_limit   : 0.2
   flip_horizontal  : true
   blur_limit       : 3
+
+
+model_overrides:
+  # Per-model hyperparameter overrides.
+  # train.py merges these on top of the training: defaults
+  # when model_name matches the key below.
+  # This keeps ResNet18 defaults untouched for future re-runs.
+  hagridv2:
+    batch_size     : 8        # safe for RTX 3070 8GB with frozen ViT-B16
+    learning_rate  : 0.0003   # ViT heads train well at lower LR than ResNet
+    freeze_backbone: true     # train classification head only (3,076 params)
+  
+  hagridv2_resnet18:
+    batch_size     : 32      # same as resnet18 — small model, no VRAM concern
+    learning_rate  : 0.001   # same as resnet18 baseline
+    freeze_backbone: true
+    use_crop: false
+
+  # Future models can follow the same pattern, e.g.:
+  # vitb16:
+  #   batch_size    : 8
+  #   learning_rate : 0.0003
+  # yolo:
+  #   batch_size    : 16
+  #   learning_rate : 0.001
+
+

@@ -30,3 +30,15 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Data and outputs
+data/train/
+data/split/
+data/excluded/
+outputs/split_manifest.csv
+*.pyc
+
+# API keys for SERPER Search, @thuthanh.hr
+# 1d260900ba78a36b43a2414c788a547c8868212d
+*.env
+web_image_scraper/config.py

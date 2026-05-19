@@ -1,0 +1,15 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+nc: 4
+names:
+- 2-finger-heart
+- traditional-heart
+- traditional-heart-2
+- upside_down_heart
+roboflow:
+  workspace: shuindec
+  project: shuindec
+  version: dataset
+  license: Private
+  url: https://app.roboflow.com/shuindec/shuindec/dataset
