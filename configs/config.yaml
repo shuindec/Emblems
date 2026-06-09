@@ -53,7 +53,7 @@ preprocessing:
 
 # ── Training (populated in Phase 3) ───────────────────────────────────────
 training:
-  model_name       : "resnet18"     # options: hagridv2, vitb16, mlp_landmarks
+  model_name       : "yolo_fullframe"     # options: hagridv2, vitb16, mlp_landmarks. resnet18 is default baseline.
   num_classes      : 4
   pretrained       : true
   freeze_backbone  : true           # set false for full fine-tune
@@ -93,8 +93,14 @@ model_overrides:
   # vitb16:
   #   batch_size    : 8
   #   learning_rate : 0.0003
-  # yolo:
-  #   batch_size    : 16
-  #   learning_rate : 0.001
+  yolo:
+    batch_size     : 16      # conservative start; increase to 32 if no OOM
+    learning_rate  : 0.001
+    freeze_backbone: true
+    use_crop       : true    # crop to hand region
 
-
+yolo_fullframe:
+  batch_size     : 16
+  learning_rate  : 0.001
+  freeze_backbone: true
+  use_crop       : false

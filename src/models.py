@@ -31,6 +31,7 @@ USAGE:
 from __future__ import annotations
 
 import sys
+from typing import cast
 from pathlib import Path
 from collections import Counter
 
@@ -39,6 +40,7 @@ import torch.nn as nn
 from torchvision import models
 import timm
 import torchvision
+from ultralytics import YOLO as UltralyticsYOLO
 
 # ── shared utilities ──
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -220,58 +222,146 @@ def build_hagridv2_resnet18(cfg: dict) -> nn.Module:
 #         return model
 
 
-# def build_yolo_classifier(num_classes: int, freeze_backbone: bool) -> nn.Module:
-#     """
-#     Build a YOLOv10x model in CLASSIFICATION mode.
+def build_yolo_classifier(cfg: dict) -> torch.nn.Module:
+    """
+    Build a YOLOv8x classification model for heart gesture recognition.
+ 
+    Uses YOLOv8x-cls pretrained on ImageNet via the ultralytics library.
+    The backbone (CSPDarknet) is frozen and only the final linear
+    classification head is trained — the same freeze-and-replace
+    pattern used by all other builders in this project.
+ 
+    Why YOLOv8x-cls (not YOLOv10x):
+        YOLOv10 in ultralytics is a detection-only model — no classify
+        variant exists. The HAGRIDv2 paper uses YOLOv10x as a gesture
+        DETECTOR (localises hands), not a classifier. Our pipeline is
+        a classifier, so YOLOv8x-cls is the correct and strongest
+        available YOLO classifier in ultralytics.
+ 
+    Architecture:
+        Backbone : CSPDarknet (YOLOv8x feature extractor)
+        Head     : Classify module → Linear(in_features → num_classes)
+        Head access: model.model[-1].linear  (ultralytics convention)
+ 
+    Integration note:
+        ultralytics wraps the PyTorch model inside a YOLO object.
+        We extract the raw nn.Module via yolo_obj.model so it fits
+        the existing training loop without any changes to train.py.
+        The extracted module behaves like any standard nn.Module.
+ 
+    Weight download:
+        ~68MB from GitHub on first run, cached locally after that.
+        Falls back to yolov8m-cls (~25MB) if yolov8x-cls unavailable.
+ 
+    Args:
+        cfg : dict — full loaded config (from load_config())
+ 
+    Returns:
+        model : nn.Module ready for training (extracted from YOLO wrapper)
+    """
+ 
+    training_cfg = cfg["training"]
+    num_classes  = training_cfg["num_classes"]
+    freeze       = training_cfg.get("freeze_backbone", True)
+ 
+    # ----------------------------------------------------------
+    # Step 1: Load YOLOv8x-cls pretrained weights
+    # ultralytics downloads weights automatically on first call.
+    # We try yolov8x-cls first (strongest), fall back to yolov8m-cls
+    # if the download fails (e.g. GitHub rate limiting).
+    # ----------------------------------------------------------
+ 
+    PRIMARY_MODEL  = "yolov8x-cls.pt"   # ~68MB — strongest classifier
+    FALLBACK_MODEL = "yolov8m-cls.pt"   # ~25MB — reliable fallback
+ 
+    try:
+        print(f"{Col.CYAN}[YOLO] Loading {PRIMARY_MODEL} "
+              f"(downloads ~68MB on first run)...{Col.RESET}")
+        yolo_obj = UltralyticsYOLO(PRIMARY_MODEL)
+        print(f"{Col.GREEN}[YOLO] {PRIMARY_MODEL} loaded.{Col.RESET}")
+        model_variant = PRIMARY_MODEL
+ 
+    except Exception as e:
+        print(f"{Col.YELLOW}[YOLO] {PRIMARY_MODEL} unavailable: {e}{Col.RESET}")
+        print(f"{Col.YELLOW}[YOLO] Falling back to {FALLBACK_MODEL}...{Col.RESET}")
+        yolo_obj = UltralyticsYOLO(FALLBACK_MODEL)
+        print(f"{Col.GREEN}[YOLO] {FALLBACK_MODEL} loaded.{Col.RESET}")
+        model_variant = FALLBACK_MODEL
+ 
+    # ----------------------------------------------------------
+    # Step 2: Extract the raw PyTorch nn.Module
+    # ultralytics wraps the model in a YOLO convenience object.
+    # We extract yolo_obj.model — the actual nn.Module — so it
+    # integrates with our existing train.py loop without any changes.
+    # After extraction, the module behaves like any standard model.
+    # ----------------------------------------------------------
+ 
+    model = yolo_obj.model   # nn.Module: CSPDarknet backbone + Classify head
+    if not isinstance(model, nn.Module):
+        raise TypeError("Ultralytics YOLO did not return a valid nn.Module")
+ 
+    # ----------------------------------------------------------
+    # Step 3: Freeze backbone if configured
+    # Freeze ALL layers first — then Step 4 unfreezes the head only.
+    # With backbone frozen, only 3 parameters (the new linear layer)
+    # will update during training, which is appropriate for our
+    # small dataset of 203 training images.
+    # ----------------------------------------------------------
+ 
+    if freeze:
+        for param in model.parameters():
+            param.requires_grad = False
+ 
+        frozen_count = sum(p.numel() for p in model.parameters()
+                           if not p.requires_grad)
+        print(f"{Col.CYAN}[YOLO] Backbone frozen — "
+              f"{frozen_count:,} parameters locked.{Col.RESET}")
+    else:
+        print(f"{Col.YELLOW}[YOLO] Backbone NOT frozen — "
+              f"full fine-tune mode.{Col.RESET}")
+ 
+    # ----------------------------------------------------------
+    # Step 4: Replace the classification head
+    # YOLO classify head is a Classify module at model.model[-1].
+    # Its linear layer (model.model[-1].linear) is what we replace.
+    # The new Linear layer defaults to requires_grad=True, so it
+    # is always trainable regardless of the freeze flag above.
+    #
+    # We read in_features from the existing linear layer before
+    # replacing it — this works for any YOLOv8 size variant since
+    # each has a different feature dimension (e.g. x=640, m=512).
+    # ----------------------------------------------------------
+ 
+    # Locate the Classify module (some Ultralytics builds may wrap/replace
+    # the final layer such that model.model[-1] may be a Tensor or other
+    # object without a 'linear' attribute). Search backwards for a
+    # module exposing a `linear` attr.
+    classify_head = None
+    for m in reversed(list(cast(nn.Sequential, model.model))):
+        if hasattr(m, "linear"):
+            classify_head = m
+            break
+    if classify_head is None:
+        raise TypeError("Unable to find YOLO classify head with a 'linear' attribute")
 
-#     Important distinction:
-#       Standard YOLO  → detection (bounding boxes + class)
-#       YOLO classify  → pure image classification (no boxes)
+    existing_linear = cast(nn.Linear, classify_head.linear)
+    in_features = existing_linear.in_features
 
-#     We use classification mode here because our DataLoader already
-#     crops the hand region — YOLO doesn't need to detect it again.
-#     The YOLO backbone (CSPDarknet) is still used for feature extraction.
-
-#     Note: ultralytics must be installed: pip install ultralytics
-
-#     Args:
-#         num_classes     : number of gesture classes (4)
-#         freeze_backbone : if True, only the classifier head trains
-
-#     Returns:
-#         nn.Module ready for training
-#     """
-#     try:
-#         from ultralytics import YOLO
-
-#         # Load YOLOv10x pretrained on ImageNet in classification mode
-#         # 'yolov8x-cls.pt' is the classification variant
-#         # (YOLOv10 classify weights use the same loading pattern)
-#         yolo = YOLO("yolov8x-cls.pt")    # downloads ~130MB on first run
-#         model = yolo.model               # extract the nn.Module
-
-#         if freeze_backbone:
-#             # Freeze everything except the final classifier
-#             for name, param in model.named_parameters():
-#                 if "classifier" not in name and "head" not in name:
-#                     param.requires_grad = False
-
-#         # Replace the output layer to match our num_classes
-#         # YOLO classify models end with a Linear layer
-#         if hasattr(model, "classifier"):
-#             in_features = model.classifier[-1].in_features
-#             model.classifier[-1] = nn.Linear(in_features, num_classes)
-#         elif hasattr(model, "head"):
-#             in_features = model.head.linear.in_features
-#             model.head.linear = nn.Linear(in_features, num_classes)
-
-#         return model
-
-#     except ImportError:
-#         raise ImportError(
-#             "ultralytics is required for YOLO. Install it with:\n"
-#             "  pip install ultralytics"
-#         )
+    # Replace with fresh linear layer for our num_classes
+    classify_head.linear = torch.nn.Linear(in_features, num_classes)
+ 
+    # Log the head configuration for verification
+    print(f"{Col.CYAN}[YOLO] Head replaced: "
+          f"Linear({in_features} → {num_classes}) "
+          f"[{model_variant}]{Col.RESET}")
+ 
+    # Confirm trainable parameter count
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total      = sum(p.numel() for p in model.parameters())
+    print(f"{Col.GREEN}[YOLO] Trainable: {trainable:,} / {total:,} "
+          f"parameters{Col.RESET}")
+ 
+    return model
 
 def build_hagridv2(cfg: dict) -> torch.nn.Module:
     """
@@ -419,7 +509,7 @@ def compute_class_weights(cfg: dict,
     # Count training samples per class from manifest
     df     = pd.read_csv(paths["manifest"], encoding="utf-8")
     train  = df[df["split"] == "train"]
-    counts = Counter(train["class_name"].tolist())
+    counts: Counter[str] = Counter(train["class_name"].tolist())
 
     total  = sum(counts.values())
     weights = []
@@ -505,7 +595,8 @@ def get_model(cfg: dict) -> tuple[nn.Module, torch.optim.Optimizer, nn.Module]:
     # ── build selected backbone ──
     builders = {
         "resnet18" : lambda: build_resnet18(num_classes, freeze_backbone),
-        # "yolo"     : lambda: build_yolo_classifier(num_classes, freeze_backbone),
+        "yolo"     : lambda: build_yolo_classifier(cfg),
+        "yolo_fullframe" : lambda: build_yolo_classifier(cfg),
         # "vitb16"   : lambda: build_vitb16(num_classes, freeze_backbone),
         "hagridv2"  : lambda: build_hagridv2(cfg),
         "hagridv2_resnet18"  : lambda: build_hagridv2_resnet18(cfg),

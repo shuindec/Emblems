@@ -48,7 +48,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import argparse
 
 import cv2
-import mediapipe as mp
+import mediapipe.python.solutions.drawing_utils as mp_drawing
+import mediapipe.python.solutions.hands as mp_hands_module
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -266,6 +267,8 @@ def classify_hand(
     # Step 4: forward pass — torch.no_grad() disables gradient tracking (faster)
     with torch.no_grad():
         logits = model(tensor)               # shape: [1, num_classes]
+        if isinstance(logits, tuple):        # YOLO returns (tensor, ...) in eval mode
+            logits = logits[0]
         probs  = F.softmax(logits, dim=1)[0] # shape: [num_classes]
 
     confidence, class_idx = probs.max(dim=0)
@@ -396,10 +399,7 @@ def main():
     # ── MediaPipe Hands ───────────────────────────────────────────────────────
     # max_num_hands=2 so both hands of a two-handed heart gesture are tracked.
     # MediaPipe is the hand DETECTOR only — ResNet18 is the gesture CLASSIFIER.
-    mp_hands   = mp.solutions.hands
-    mp_drawing = mp.solutions.drawing_utils
-
-    hands = mp_hands.Hands(
+    hands = mp_hands_module.Hands(
         static_image_mode=False,       # video mode: uses temporal tracking
         max_num_hands=2,               # support two-handed gestures
         min_detection_confidence=0.70, # raised from 0.6 to reduce noisy crops
@@ -431,9 +431,9 @@ def main():
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results   = hands.process(frame_rgb)
 
-        if results.multi_hand_landmarks:
+        if results.multi_hand_landmarks:  # type: ignore[attr-defined]
             # all_landmarks is a list of 1 or 2 NormalizedLandmarkList objects
-            all_landmarks = results.multi_hand_landmarks
+            all_landmarks = results.multi_hand_landmarks  # type: ignore[attr-defined]
 
             # Compute ONE merged square crop covering all detected hands
             crop_result = crop_hand_region(frame, all_landmarks)
@@ -447,7 +447,7 @@ def main():
 
                 draw_overlay(
                     frame, label, confidence, bbox,
-                    all_landmarks, mp_drawing, mp_hands, model_name,
+                    all_landmarks, mp_drawing, mp_hands_module, model_name,
                 )
             else:
                 draw_status(frame, "Hand too small / too close", model_name)

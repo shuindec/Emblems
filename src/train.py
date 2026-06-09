@@ -135,7 +135,9 @@ def run_epoch(model: nn.Module,
             labels = labels.to(device)
 
             # ── Forward pass ──
-            outputs = model(images)              # shape: [batch, num_classes]
+            outputs = model(images)
+            if isinstance(outputs, (tuple, list)):
+                outputs = outputs[0]             # YOLO returns (logits, ...) tuple
             loss    = criterion(outputs, labels)
 
             if is_train and optimiser is not None:

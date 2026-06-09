@@ -262,7 +262,7 @@ def get_class_for_image(img_path: Path, lbl_dir: Path,
 
 
 def count_classes(img_paths: list[Path], lbl_dir: Path,
-                  class_names: list[str]) -> Counter:
+                  class_names: list[str]) -> Counter[str]:
     """
     Count how many images belong to each class across a list of images.
 
@@ -274,7 +274,7 @@ def count_classes(img_paths: list[Path], lbl_dir: Path,
     Returns:
         Counter mapping class_name → count
     """
-    counts = Counter()
+    counts: Counter[str] = Counter()
     for img_path in img_paths:
         cls = get_class_for_image(img_path, lbl_dir, class_names)
         if cls:

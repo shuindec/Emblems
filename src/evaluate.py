@@ -136,7 +136,9 @@ def run_inference(model: nn.Module,
         for images, labels in test_loader:
             images = images.to(device)
 
-            outputs = model(images)                          # raw logits [B, C]
+            outputs = model(images)
+            if isinstance(outputs, (tuple, list)):
+                outputs = outputs[0]                         # YOLO returns (logits, ...) tuple
             probs   = torch.softmax(outputs, dim=1)          # probabilities [B, C]
             confs, preds = probs.max(dim=1)                  # max prob + its index
 
